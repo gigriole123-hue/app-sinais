@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0b1220"/>
+<title>Sinais — SMC + Wyckoff + Institucional (PWA)</title>
+<style>
+  :root{ --bg:#0b1220; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; --buy:#16a34a; --sell:#dc2626; --accent:#38bdf8; }
+  *{ box-sizing: border-box; }
+  body{ margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:1100px; margin:0 auto; padding:16px; }
+  .header{ display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  h1{ font-size:18px; margin:0; }
+  .grid{ display:grid; grid-template-columns:1fr; gap:12px; }
+  @media(min-width:900px){ .grid{ grid-template-columns:280px 1fr 320px; } }
+  .card{ background:var(--panel); border:1px solid #1f2937; border-radius:14px; padding:12px; }
+  label{ font-size:12px; color:var(--muted); display:block; margin-top:6px; }
+  input,select{ width:100%; background:#0b1220; color:var(--text); border:1px solid #1f2937; border-radius:10px; padding:8px; margin-top:4px; }
+  button{ background:#0b1220; color:var(--text); border:1px solid #334155; border-radius:10px; padding:8px 10px; cursor:pointer; }
+  button:hover{ border-color:#475569; }
+  .row{ display:flex; gap:8px; align-items:center; }
+  .row>*{ flex:1; }
+  .badges{ display:flex; gap:6px; flex-wrap:wrap; }
+  .badge{ font-size:11px; padding:4px 8px; border-radius:999px; border:1px solid #334155; color:#cbd5e1; }
+  .buy{ background:rgba(22,163,74,.15); border-color:rgba(22,163,74,.35); }
+  .sell{ background:rgba(220,38,38,.15); border-color:rgba(220,38,38,.35); }
+  .list{ max-height:260px; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .item{ padding:8px; border:1px solid #334155; border-radius:10px; font-size:13px; }
+  canvas{ width:100%; height:280px; background:#0b1220; border-radius:10px; border:1px solid #1f2937; }
+  footer{ opacity:.6; font-size:12px; margin-top:10px; text-align:center; }
+  .install-tip{ font-size:12px; color:#9ca3af; margin-top:8px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>Sinais • SMC + Wyckoff + Institucional</h1>
+      <div style="font-size:12px;color:#9ca3af">PWA — instale no celular (menu “Adicionar à tela inicial”)</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="row">
+          <div>
+            <label>Mercado</label>
+            <select id="market">
+              <option value="B3">B3</option>
+              <option value="Forex">Forex</option>
+              <option value="Cripto" selected>Cripto</option>
+            </select>
+          </div>
+          <div>
+            <label>Símbolo</label>
+            <select id="symbol">
+              <option>BTCUSDT</option>
+              <option>ETHUSDT</option>
+              <option>SOLUSDT</option>
+              <option>BNBUSDT</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Timeframe (visual)</label>
+            <select id="tf">
+              <option>M1</option>
+              <option selected>M5</option>
+              <option>M15</option>
+              <option>H1</option>
+            </select>
+          </div>
+          <div>
+            <label>Risco por trade (%)</label>
+            <input id="risk" type="number" value="0.5" />
+          </div>
+        </div>
+        <label>Webhook (opcional, receber alertas)</label>
+        <input id="webhook" placeholder="https://seu-endpoint" />
+        <div class="row" style="margin-top:8px;">
+          <button id="toggle">▶ Iniciar feed</button>
+          <button id="reset">↺ Resetar dados</button>
+        </div>
+        <div class="install-tip">Depois de abrir no celular, use o menu do navegador e toque em <b>Adicionar à tela inicial</b>.</div>
+      </div>
+
+      <div class="card">
+        <canvas id="chart" width="900" height="300"></canvas>
+        <div class="badges" id="legend" style="margin-top:8px">
+          <span class="badge">VWAP</span>
+          <span class="badge">BOS/CHOCH</span>
+          <span class="badge">FVG</span>
+          <span class="badge">Order Block</span>
+          <span class="badge">Liquidity Sweep</span>
+          <span class="badge">Wyckoff (heurístico)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <strong>Sinais recentes</strong>
+          <span style="font-size:12px; color:#9ca3af">Confluências ≥ 2</span>
+        </div>
+        <div class="list" id="signals"></div>
+        <div style="margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+          <strong>Logs</strong>
+          <button id="clearLogs" style="font-size:12px;">Limpar</button>
+        </div>
+        <div class="list" id="logs" style="max-height:140px;"></div>
+      </div>
+    </div>
+
+    <footer>© <span id="year"></span> • Somente para fins educacionais — Mercado envolve risco.</footer>
+  </div>
+
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
+  });
+}
+</script>
+
+<script>
+(function(){
+  const $ = (id) => document.getElementById(id);
+  const chart = $("chart");
+  const ctx = chart.getContext("2d");
+  const signalsEl = $("signals");
+  const logsEl = $("logs");
+  const toggleBtn = $("toggle");
+  const resetBtn = $("reset");
+  const clearLogsBtn = $("clearLogs");
+  const webhookEl = $("webhook");
+  const riskEl = $("risk");
+  document.getElementById("year").textContent = new Date().getFullYear();
+
+  const fmt = (n) => new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 }).format(n);
+
+  function log(msg){
+    const div = document.createElement('div');
+    div.className = 'item';
+    const ts = new Date().toLocaleTimeString();
+    div.textContent = `[${ts}] ${msg}`;
+    logsEl.prepend(div);
+    while (logsEl.children.length > 80) logsEl.removeChild(logsEl.lastChild);
+  }
+
+  function addSignal({dir, price, confluences, wy}){
+    const div = document.createElement('div');
+    div.className = 'item ' + (dir==='BUY'?'buy':'sell');
+    div.innerHTML = `<div style="display:flex;justify-content:space-between"><b>${dir}</b><span style="opacity:.7">${fmt(price)}</span></div>`+
+                    `<div style="font-size:12px;opacity:.9;margin-top:4px;">${confluences.join(' • ')}${wy?(' • '+wy):''}</div>`;
+    signalsEl.prepend(div);
+    while (signalsEl.children.length > 40) signalsEl.removeChild(signalsEl.lastChild);
+  }
+
+  function genOHLCV(bars=420, start=100){
+    const out=[]; let price=start; let vnum=0, vden=0;
+    for(let i=0;i<bars;i++){
+      const shock=(Math.random()-0.5)*1.8; const dir=Math.random()<0.5?-1:1;
+      const step=dir*(Math.abs(shock)+0.02);
+      const open=price; const high=open+Math.abs(step)*(1+Math.random());
+      const low=open-Math.abs(step)*(1+Math.random());
+      const close=Math.max(low, Math.min(high, open+step));
+      const volume=Math.max(1, Math.round(100+Math.random()*900));
+      const typical=(high+low+close)/3; vnum+=typical*volume; vden+=volume;
+      out.push({t:i, open, high, low, close, volume, vwap:vnum/vden});
+      price=close;
+    }
+    return out;
+  }
+
+  function swings(data, k=3){
+    const s=[]; for(let i=k;i<data.length-k;i++){
+      const hi=data[i].high, lo=data[i].low; let isHH=true, isLL=true;
+      for(let j=i-k;j<=i+k;j++){ if(hi < data[j].high) isHH=false; if(lo > data[j].low) isLL=false; }
+      if(isHH) s.push({i, type:'SH', price:hi}); if(isLL) s.push({i, type:'SL', price:lo});
+    } return s;
+  }
+  function bos(data, sw){
+    const res=[]; let lastH=null, lastL=null;
+    sw.forEach(x=>{ if(x.type==='SH') lastH=x.i; if(x.type==='SL') lastL=x.i; });
+    for(let i=2;i<data.length;i++){
+      const c=data[i].close; const hh=lastH?data[lastH].high:data[i-1].high; const ll=lastL?data[lastL].low:data[i-1].low;
+      if(c>hh) res.push({i, kind:'BOS_UP', price:c});
+      if(c<ll) res.push({i, kind:'BOS_DOWN', price:c});
+    } return res;
+  }
+  function fvg(data){
+    const g=[]; for(let i=2;i<data.length;i++){
+      const a=data[i-2], c=data[i];
+      if(c.low>a.high) g.push({i, dir:'up', top:a.high, bottom:c.low});
+      if(c.high<a.low) g.push({i, dir:'down', top:c.high, bottom:a.low});
+    } return g;
+  }
+  function obs(data, bosList){
+    const o=[]; for(const s of bosList){ const dir=s.kind==='BOS_UP'?'bull':'bear';
+      for(let k=s.i-1;k>=Math.max(0,s.i-5);k--){ const b=data[k]; const opp = dir==='bull' ? (b.close<b.open) : (b.close>b.open);
+        if(opp){ o.push({i:k, dir, hi:b.high, lo:b.low}); break; }
+      }
+    } return o;
+  }
+  function sweeps(data){
+    const r=[]; for(let i=2;i<data.length;i++){ const pH=data[i-1].high, pL=data[i-1].low, b=data[i];
+      if(b.high>pH && b.close<pH) r.push({i, kind:'SWEEP_HIGH', price:pH});
+      if(b.low<pL && b.close>pL) r.push({i, kind:'SWEEP_LOW', price:pL});
+    } return r;
+  }
+  function wyckoff(data, w=40){
+    const lab=new Array(data.length).fill(null);
+    for(let i=w;i<data.length;i++){
+      const slice=data.slice(i-w,i); const highs=slice.map(b=>b.high), lows=slice.map(b=>b.low);
+      const range=Math.max(...highs)-Math.min(...lows); const avgV=slice.reduce((a,b)=>a+b.volume,0)/slice.length; const last=data[i-1];
+      const bull=last.close>last.vwap; const volRel=last.volume/(avgV||1); let phase='Trend';
+      if(range/(last.close||1)<0.02) phase='Acumulação';
+      if(range/(last.close||1)>0.06 && volRel>1.4) phase=bull?'Markup':'Markdown';
+      if(volRel>1.8 && !bull) phase='Clímax de Venda';
+      if(volRel>1.8 && bull) phase='Clímax de Compra';
+      lab[i]=phase;
+    }
+    return lab;
+  }
+  function engine(data){
+    const sw=swings(data), bs=bos(data, sw), g=fvg(data), o=obs(data, bs), sp=sweeps(data), wy=wyckoff(data);
+    const byIndex=(arr)=>arr.reduce((m,s)=>{ (m[s.i]=m[s.i]||[]).push(s); return m; },{});
+    const mB=byIndex(bs), mG=byIndex(g), mO=byIndex(o), mS=byIndex(sp);
+    const sig=[]; for(let i=2;i<data.length;i++){
+      const conf=[]; if(mB[i]) conf.push(...mB[i].map(x=>x.kind)); if(mG[i]) conf.push(...mG[i].map(x=>'FVG_'+x.dir)); if(mO[i]) conf.push(...mO[i].map(x=>'OB_'+x.dir)); if(mS[i]) conf.push(...mS[i].map(x=>x.kind));
+      const wyLbl=wy[i]||null; if(conf.length>=2){
+        const score=conf.reduce((a,k)=>{ if(k.includes('UP')||k.includes('bull')||k.includes('LOW')) return a+1; if(k.includes('DOWN')||k.includes('bear')||k.includes('HIGH')) return a-1; return a; },0);
+        const dir= score>=0 ? 'BUY':'SELL'; sig.push({i, dir, confluences:conf, wy:wyLbl});
+      }
+    }
+    return {sig, bs, g, o, sp, wy};
+  }
+  function positionSize({balance=10000, riskPct=0.5, entry, stop}){
+    const risk = balance*(riskPct/100); const dist=Math.max(0.0001, Math.abs(entry-stop));
+    return {qty: risk/dist, risk};
+  }
+  function draw(data, highlights){
+    const W=chart.width, H=chart.height, pad=12; ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#0b1220'; ctx.fillRect(0,0,W,H);
+    const max=Math.max(...data.map(d=>d.high)); const min=Math.min(...data.map(d=>d.low));
+    const xStep=(W-pad*2)/Math.max(1,data.length-1);
+    const y=(p)=> pad+(H-pad*2) - ((p-min)/(max-min))*(H-pad*2);
+    ctx.strokeStyle='#1f2937'; ctx.lineWidth=1; ctx.beginPath();
+    for(let i=0;i<6;i++){ const yy=pad+i*(H-pad*2)/5; ctx.moveTo(pad,yy); ctx.lineTo(W-pad,yy); }
+    ctx.stroke();
+    ctx.beginPath(); ctx.lineWidth=1; ctx.strokeStyle='#38bdf8';
+    data.forEach((d,i)=>{ const X=pad+i*xStep, Y=y(d.vwap); if(i===0) ctx.moveTo(X,Y); else ctx.lineTo(X,Y); });
+    ctx.stroke();
+    data.forEach((d,i)=>{
+      const X=pad+i*xStep; const O=y(d.open), C=y(d.close), Hi=y(d.high), Lo=y(d.low);
+      ctx.strokeStyle='#94a3b8'; ctx.beginPath(); ctx.moveTo(X,Hi); ctx.lineTo(X,Lo); ctx.stroke();
+      ctx.fillStyle = d.close>=d.open ? '#16a34a' : '#dc2626';
+      const top=Math.min(O,C), h=Math.max(2, Math.abs(O-C));
+      ctx.fillRect(X-2, top, 4, h);
+    });
+    ctx.globalAlpha=0.25; highlights.g.forEach(s=>{ const X=pad+(s.i-1)*xStep; const Yt=y(s.top), Yb=y(s.bottom); ctx.fillStyle='#fbbf24'; ctx.fillRect(X, Math.min(Yt,Yb), xStep, Math.abs(Yt-Yb)); }); ctx.globalAlpha=1;
+    ctx.globalAlpha=0.20; highlights.o.forEach(s=>{ const X=pad+s.i*xStep-3; const Yh=y(s.hi), Yl=y(s.lo); ctx.fillStyle= s.dir==='bull'?'#10b981':'#ef4444'; ctx.fillRect(X, Math.min(Yh,Yl), 6, Math.abs(Yh-Yl)); }); ctx.globalAlpha=1;
+    highlights.bs.forEach(s=>{ const X=pad+s.i*xStep, Y=y(data[s.i].close); ctx.fillStyle='#2563eb'; ctx.beginPath(); ctx.arc(X,Y,3,0,Math.PI*2); ctx.fill(); });
+    highlights.sp.forEach(s=>{ const X=pad+s.i*xStep, Y=y(data[s.i].close); ctx.fillStyle='#7c3aed'; ctx.beginPath(); ctx.arc(X,Y,3,0,Math.PI*2); ctx.fill(); });
+  }
+
+  let data = genOHLCV(420, 100);
+  let running=false; let loop;
+
+  function recomputeAndRender(){
+    const e = engine(data);
+    draw(data.slice(-240), { bs:e.bs.slice(-240), g:e.g.slice(-240), o:e.o.slice(-240), sp:e.sp.slice(-240) });
+    if(e.sig.length){
+      const last=e.sig[e.sig.length-1];
+      if(!recomputeAndRender._last || last.i!==recomputeAndRender._last){
+        recomputeAndRender._last = last.i;
+        const i=last.i; const entry=data[i]?.close||0; const prev=data[i-1]||data[i];
+        const stop= last.dir==='BUY' ? prev.low : prev.high;
+        const {qty}=positionSize({balance:10000,riskPct:parseFloat(riskEl.value||'0.5'),entry,stop});
+        addSignal({dir:last.dir, price:entry, confluences:last.confluences, wy:last.wy});
+        const payload = { market: document.getElementById('market').value, symbol: document.getElementById('symbol').value, timeframe: document.getElementById('tf').value, signal:last.dir, confluences:last.confluences, wyckoff:last.wy, price:entry, ts:new Date().toISOString(), qty };
+        log(`${payload.signal} ${payload.symbol} @ ${fmt(payload.price)} | ${payload.confluences.join(' + ')}${payload.wyckoff?(' | '+payload.wyckoff):''}`);
+        const url = document.getElementById('webhook').value.trim();
+        if(url){ try{ fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)}).catch(()=>{});}catch(err){ log('Falha webhook: '+(err?.message||err)); } }
+      }
+    }
+  }
+
+  function tick(){
+    const last = data[data.length-1];
+    const n = genOHLCV(1, last.close)[0]; n.t = last.t+1; data.push(n); if(data.length>650) data.shift();
+    recomputeAndRender();
+  }
+
+  function start(){ if(running) return; running=true; toggleBtn.textContent='⏸ Pausar'; loop = setInterval(tick, 900); }
+  function stop(){ if(!running) return; running=false; toggleBtn.textContent='▶ Iniciar feed'; clearInterval(loop); }
+
+  toggleBtn.addEventListener('click', ()=>{ running?stop():start(); });
+  resetBtn.addEventListener('click', ()=>{ data = genOHLCV(420, 100); recomputeAndRender(); log('Dados resetados'); });
+  clearLogsBtn.addEventListener('click', ()=>{ logsEl.innerHTML=''; signalsEl.innerHTML=''; });
+
+  recomputeAndRender();
+})();
+</script>
+</body>
+</html>
